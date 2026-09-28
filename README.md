@@ -13,9 +13,11 @@ TypeSafe's Jev makes every judgment in one cheap parallel call. A whole supervis
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for how each Bob feature is used and the decision flow.
 
+> **OpenJEV support:** Jev is built by [TypeSafe](https://typesafe.ai). This fork keeps TypeSafe as the default and adds optional support for [OpenJEV](https://openjev.sh), a free community gateway to the same Jev model — set `OPENJEV_API_KEY` (or `JEV_PROVIDER=openjev`) to use it. Original project: https://github.com/monickverma/hall-monitor by @monickverma.
+
 ## Install and first run
 
-Needs Python 3.11+ and a TypeSafe API key for Jev, set as `TYPESAFE_API_KEY` in the environment (never in a file). Bob Shell runs also need `BOB_API_KEY`.
+Needs Python 3.11+ and a TypeSafe API key for Jev, set as `TYPESAFE_API_KEY` in the environment (never in a file). Bob Shell runs also need `BOB_API_KEY`. Alternatively, set `OPENJEV_API_KEY` (and optionally `JEV_PROVIDER=openjev`) to use [OpenJEV](https://openjev.sh), a free community gateway to the same Jev model — see [OPENJEV.md](OPENJEV.md) for details.
 
 ```bash
 pip install typesafe-sdk pytest reportlab

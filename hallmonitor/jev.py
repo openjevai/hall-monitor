@@ -3,8 +3,11 @@
 The model is pinned: `jev-latest` moves, and every threshold here was tuned against one model.
 Jev bills input tokens only (output is free, docs.typesafe.ai/models), so `tokens()` counts input tokens.
 """
+import json
 import os
 import time
+import urllib.error
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 
 from typesafe_sdk import TypeSafeAuthenticationError, TypeSafeClient, TypeSafeError, TypeSafePermissionDeniedError
@@ -16,6 +19,11 @@ MODEL = os.environ.get("HM_JEV_MODEL", CALIBRATED_MODEL)
 UNCALIBRATED = MODEL != CALIBRATED_MODEL
 PRICE_PER_M_INPUT = 0.042  # $ per 1M input tokens; output tokens are free (docs.typesafe.ai/models)
 
+# --- OpenJEV (optional community gateway to the same Jev model) ---
+# OpenJEV is an additive option; TypeSafe stays the default. See OPENJEV.md.
+OPENJEV_ENDPOINT = "https://api.openjev.sh/v1/systemone"
+OPENJEV_MODEL = "openjev"
+
 _client = None
 
 
@@ -24,18 +32,101 @@ class JevRefused(Exception):
     outlasted the retries. Callers fall back to code-only rules."""
 
 
+def _provider():
+    """Which Jev provider to use: 'openjev' or 'typesafe'.
+
+    1. JEV_PROVIDER=openjev (or =typesafe) wins explicitly.
+    2. Otherwise TypeSafe if TYPESAFE_API_KEY is set (default, unchanged).
+    3. Otherwise OpenJEV if OPENJEV_API_KEY is set.
+    Anyone with a TypeSafe key sees zero behaviour change.
+    """
+    explicit = os.environ.get("JEV_PROVIDER", "").strip().lower()
+    if explicit == "openjev":
+        return "openjev"
+    if explicit == "typesafe":
+        return "typesafe"
+    if os.environ.get("TYPESAFE_API_KEY"):
+        return "typesafe"
+    if os.environ.get("OPENJEV_API_KEY"):
+        return "openjev"
+    return "typesafe"  # original default
+
+
+class _OpenJEVResponse:
+    """Mimics the TypeSafe SDK's pydantic model: .model_dump() returns a plain dict."""
+
+    def __init__(self, data):
+        self._data = data
+
+    def model_dump(self):
+        return self._data
+
+
+class _OpenJEVClient:
+    """Minimal HTTP client for the OpenJEV gateway — same .system_one() interface as TypeSafeClient.
+
+    Uses only the standard library so it does not add a dependency. Retries 429/503/529 with
+    backoff (matching the ask() loop's transient-error handling); 401/403 are surfaced as
+    TypeSafeError so ask() treats them as key/content problems without retrying.
+    """
+
+    def __init__(self, model=OPENJEV_MODEL):
+        self.model = model
+        key = os.environ.get("OPENJEV_API_KEY")
+        if not key:
+            raise TypeSafeError("OpenJEV selected but OPENJEV_API_KEY is not set.")
+        self._key = key
+
+    def system_one(self, *, state, questions):
+        body = json.dumps(
+            {"model": self.model, "state": state, "questions": questions},
+            default=lambda o: o.model_dump() if hasattr(o, "model_dump") else o.__dict__,
+        ).encode()
+        for attempt in range(3):
+            req = urllib.request.Request(
+                OPENJEV_ENDPOINT,
+                data=body,
+                headers={
+                    "Authorization": f"Bearer {self._key}",
+                    "Content-Type": "application/json",
+                },
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    data = json.loads(resp.read())
+                    data.setdefault("model", self.model)
+                    if "usage" in data:
+                        data["usage"].setdefault("input_tokens", 0)
+                    return _OpenJEVResponse(data)
+            except urllib.error.HTTPError as e:
+                detail = e.read().decode(errors="replace")[:300]
+                if e.code in (429, 503, 529) and attempt < 2:
+                    time.sleep(1.5 * 2 ** attempt)
+                    continue
+                raise TypeSafeError(f"OpenJEV error ({e.code}): {detail}") from e
+            except (urllib.error.URLError, OSError) as e:
+                if attempt < 2:
+                    time.sleep(1.5 * 2 ** attempt)
+                    continue
+                raise TypeSafeError(f"OpenJEV unreachable: {e}") from e
+
+
 def _get():
     global _client
     if _client is None:
-        _client = TypeSafeClient(model=MODEL)
+        if _provider() == "openjev":
+            _client = _OpenJEVClient()
+        else:
+            _client = TypeSafeClient(model=MODEL)
     return _client
 
 
-def load_key_from_user_env(names=("TYPESAFE_API_KEY", "BOB_API_KEY")):
+def load_key_from_user_env(names=("TYPESAFE_API_KEY", "BOB_API_KEY", "OPENJEV_API_KEY")):
     """Bob starts the MCP server without the user's environment: in the probe (Sept 27), TYPESAFE_API_KEY
     set in the shell that ran `bob run` never reached it. On Windows, read the keys from where `setx`
     saved them, so they still never go in a file. BOB_API_KEY is for the Receipts auditor's own `bob run`
     (bob.shell_audit): without it, every audit failed with "Bob API key is required" (Sept 27).
+    OPENJEV_API_KEY is the optional community-gateway key (see OPENJEV.md).
     Called by the entry scripts Bob launches, not by tests."""
     for name in names:
         if os.environ.get(name, "").startswith("${"):  # Bob leaves ${env:NAME} as is when NAME is unset

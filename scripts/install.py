@@ -79,7 +79,7 @@ def main(repo, probe=False):
     merge_json(bob / "mcp.json", {"mcpServers": {"hall-monitor": {
         "command": Path(sys.executable).as_posix(), "args": [(HERE / "hm_mcp.py").as_posix()],
         "cwd": repo.as_posix(), "env": {"HM_ROOT": repo.as_posix(), "TYPESAFE_API_KEY": "${env:TYPESAFE_API_KEY}",
-                                        "BOB_API_KEY": "${env:BOB_API_KEY}"},  # the Receipts auditor's `bob run`
+                                        "BOB_API_KEY": "${env:BOB_API_KEY}", "OPENJEV_API_KEY": "${env:OPENJEV_API_KEY}"},  # the Receipts auditor's `bob run`
         "alwaysAllow": MCP_TOOLS}}})
 
     # Our modes sit at the end of the file after MARKER, so reinstalling replaces them in place.

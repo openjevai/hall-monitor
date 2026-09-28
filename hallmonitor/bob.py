@@ -73,7 +73,7 @@ def _record(root, mode, prompt, data):
     row = {"t": time.time(), "mode": mode, "prompt": prompt[:300], "status": data.get("status"), "stats": stats}
     if data.get("error"):  # why a run failed. Real Bob, Sept 27: every audit was "unparsed", and nothing said why
         error = str(data["error"])[-300:]
-        for name in ("BOB_API_KEY", "TYPESAFE_API_KEY"):
+        for name in ("BOB_API_KEY", "TYPESAFE_API_KEY", "OPENJEV_API_KEY"):
             if len(os.environ.get(name) or "") >= 8:
                 error = error.replace(os.environ[name], f"<{name}>")
         row["error"] = error
